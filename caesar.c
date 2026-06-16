@@ -1,3 +1,5 @@
+// TODO make return values parenthesized
+// return (whatever_you_return);
 #include <sys/param.h>
 #include <sys/module.h>
 #include <sys/kernel.h>
@@ -36,7 +38,7 @@ static struct cdevsw caesar_cdevsw = {
     .d_name     = "caesar",
 };
 
-static int in_place_caesar_cipher(struct caesar_buffer *buf, int caesar_offset) {
+static void in_place_caesar_cipher(struct caesar_buffer *buf, int caesar_offset) {
     char* c = buf->buffer;
     int case_offset = 0;
     for (int i = 0; i < buf->length; i++, c++) {
@@ -47,8 +49,6 @@ static int in_place_caesar_cipher(struct caesar_buffer *buf, int caesar_offset) 
 
         *c = (*c - case_offset + caesar_offset) % 26 + case_offset;
     }
-
-    return 0;
 }
 
 
@@ -65,18 +65,35 @@ static int d_close(struct cdev *dev, int fflag, int devtype, struct thread *td) 
 //  if false: transfer shifted cipher to the user
 //  else: return an EOF to stop cat from reading
 // NOTE THAT THIS IS NOT A THREAD SAFE OPERATION, IT IS JUST AN EXAMPLE
+// NOTE THAT THIS IS INTENDED TO BE USED WITH THE CAT COMMAND
+static int is_searching = 1;
 static int d_read(struct cdev *dev, struct uio *uio, int ioflag) {
     int error;
 
     if (buf->length == 0)
         return 0;
 
+    // send an EOF when caesar cipher has fully looped
+    if (!is_searching) {
+        is_searching = 1;
+        return 0;
+    }
+
+    // display all caesar ciphers that are reachable with a given CAESAR_OFFSET_DELTA
     static int current_caesar_offset = 0;
     const int CAESAR_OFFSET_DELTA = 10;
     in_place_caesar_cipher(buf, CAESAR_OFFSET_DELTA);
     current_caesar_offset = (current_caesar_offset + CAESAR_OFFSET_DELTA) % 26;
     if (current_caesar_offset == 0)
-        return (0);
+        is_searching = 0;
+
+
+    error = uiomove(buf->buffer, buf->length, uio);
+    if (error != 0) {
+        uprintf("Caesar driver error: uiomove failed\n");
+        buf->length = 0;
+        return 0;
+    }
 
     return error;
 }
@@ -89,7 +106,7 @@ static int d_write(struct cdev *dev, struct uio *uio, int ioflag) {
 
     error = uiomove(buf->buffer, buf->length, uio);
     if (error != 0) {
-        uprintf("Caesar driver error: uiomove failed");
+        uprintf("Caesar driver error: uiomove failed\n");
         buf->length = 0;
         return error;
     }
